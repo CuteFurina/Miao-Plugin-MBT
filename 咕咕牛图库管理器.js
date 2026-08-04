@@ -11541,9 +11541,10 @@ class MiaoPluginMBT extends plugin {
         };
 
         const imgBuffer = await Morpheus.shot(`Ban-P${currentPage}`, {
-          tplFile: path.join(MiaoPluginMBT.Paths.OpsPath, "resources", "html", "banlist.html"),
+          tplFile: path.join(MiaoPluginMBT.Paths.OpsPath, "resources", "html", "filter", "banlist.html"),
           data: ViewProps,
-          logger: logger
+          logger: logger,
+          pageBoundingRect: { selector: ".container" }
         });
 
         if (imgBuffer) await Pheme.img(e, imgBuffer, "封禁列表图片发送失败已文本回执。", this.logger);
@@ -11601,9 +11602,10 @@ class MiaoPluginMBT extends plugin {
           };
 
           const imgBuffer = await Morpheus.shot(`PFL-P${currentPage}`, {
-            tplFile: path.join(MiaoPluginMBT.Paths.OpsPath, "resources", "html", "banlist.html"),
+            tplFile: path.join(MiaoPluginMBT.Paths.OpsPath, "resources", "html", "filter", "banlist.html"),
             data: ViewProps,
-            logger: logger
+            logger: logger,
+            pageBoundingRect: { selector: ".container" }
           });
 
           if (imgBuffer) forwardMsgs.push(MiaoPluginMBT.ToImgSeg(imgBuffer));
@@ -11897,7 +11899,7 @@ class MiaoPluginMBT extends plugin {
           data: ViewProps,
           logger: logger,
           navOpts: { waitUntil: "load", timeout: 45000 },
-          screenshotOps: { fullPage: true }
+          pageBoundingRect: { selector: ".container" }
         });
 
         if (imgBuffer) {
@@ -11956,7 +11958,7 @@ class MiaoPluginMBT extends plugin {
           htmlContent: HelpTpl,
           data: ViewProps,
           logger: logger,
-          screenshotOps: { fullPage: true }
+          pageBoundingRect: { selector: ".main-wrapper" }
         });
 
         if (imgBuffer) {
