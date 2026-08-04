@@ -854,8 +854,6 @@ class Nyx {
             verified = false;
             protocol = "socks5_direct";
             candidate.modeDesc = "直连模式";
-            protocol = "socks5";
-            candidate.modeDesc = "代理模式";
           }
         }
       }
@@ -3533,34 +3531,12 @@ class MBTSignalTrap extends EventEmitter {
 
 const Git_Timeout_Err_Codes = new Set(["ETIMEDOUT", "Eslownet", "E_Git_Io_Stall", "E_Git_Byte_Idle_Timeout", "E_Git_Zombie_Idle", "E_Git_Speed_Floor"]);
 
-const Git_Network_Err_Keywords = [
-  "connection timed out",
-  "connection was reset",
-  "could not resolve host",
-  "unable to access",
-  "handshake failed",
-  "error: 502",
-  "error: 522",
-  "error: 504",
-  "etimedout",
-  "gnutls_handshake",
-  "rpc failed",
-  "unable to update url base from redirection",
-  "recv failure",
-  "error: 429",
-  "credential url cannot be parsed",
-  "url cannot be parsed",
-  "command timed out",
-  "command timeout",
-  "命令执行超时"
-];
-
 const Git_Strike_Strategies = new Map([
   [/Suspended due to abuse|abuse report/i, { time: 24 * 60 * 60 * 1000, type: "服务封禁" }],
-  [/Invalid input|502 Bad Gateway|index-pack|expected flush after ref listing|bad\/illegal format|missing URL/i, { time: 60 * 60 * 1000, type: "协议/服务端故障" }],
+  [/Invalid input|502|522|504|index-pack|expected flush after ref listing|bad\/illegal format|missing URL|RPC failed|url cannot be parsed|credential url cannot be parsed/i, { time: 60 * 60 * 1000, type: "协议/服务端故障" }],
   [/403|429|redirection|too many requests/i, { time: 15 * 60 * 1000, type: "限流/拒绝" }],
   [/ESLOWNET|E_GIT_IO_STALL|E_GIT_BYTE_IDLE_TIMEOUT|E_GIT_ZOMBIE_IDLE|E_GIT_SPEED_FLOOR|龟速|假死|LowSpeed|stall threshold/i, { time: 10 * 60 * 1000, type: "性能降级" }],
-  [/timed out|Connection refused|resolve host|Could not resolve|Connection was reset|Recv failure|Failed to connect/i, { time: 5 * 60 * 1000, type: "网络波动" }],
+  [/timed out|timeout|命令执行超时|Connection refused|resolve host|Could not resolve|Connection was reset|Recv failure|Failed to connect|unable to access|handshake failed|gnutls_handshake/i, { time: 5 * 60 * 1000, type: "网络波动" }],
   [/early EOF|index-pack failed|unpack-objects|write error|No space left|磁盘已满|out of memory|memory exhausted/i, { time: 3 * 60 * 1000, type: "本地资源不足" }],
   [/repository.*not found|Authentication failed|403 Forbidden|401 Unauthorized/i, { time: 30 * 60 * 1000, type: "仓库/认证异常" }]
 ]);
@@ -3894,12 +3870,12 @@ class Cerberus {
     const grace = Number(options.grace || 0);
     if (grace > 0 && now - sess.startAt < grace) return null;
     if (pulseIdle > maxPulseIdle) {
-      const err = new Error(`地狱犬会话心跳超时 ${Math.floor(pulseIdle / 1000)}s`);
+      const err = new Error(`会话心跳超时 ${Math.floor(pulseIdle / 1000)}s`);
       err.code = "E_Cerberus_Pulse_Timeout";
       return err;
     }
     if (byteIdle > maxByteIdle) {
-      const err = new Error(`地狱犬会话字节空闲 ${Math.floor(byteIdle / 1000)}s`);
+      const err = new Error(`会话字节空闲 ${Math.floor(byteIdle / 1000)}s`);
       err.code = "E_Cerberus_Byte_Idle";
       return err;
     }
@@ -5120,13 +5096,10 @@ const _wFallback = {
           const charDir = path.join(gamePath, entry.name);
           const files = await Ananke.readDir(charDir);
           const imgFiles = files.filter((f) => f.isFile() && /\.(webp|png|jpg|jpeg|bmp)$/i.test(f.name));
-          let size = 0;
-          for (const f of imgFiles) {
-            try {
-              const s = await fsPromises.stat(path.join(charDir, f.name));
-              size += s.size;
-            } catch {}
-          }
+          const stats = await Ananke.parallel(imgFiles, async (f) => {
+            try { return (await fsPromises.stat(path.join(charDir, f.name))).size; } catch { return 0; }
+          }, 32);
+          const size = stats.reduce((a, s) => a + s, 0);
           return { images: imgFiles.length, size };
         });
         const charStats = await Promise.all(charPromises);
@@ -5158,7 +5131,10 @@ const _wFactory = (ctx = {}) => {
     async run(type, payload) {
       if (!_w) {
         _w = new Worker(_wPath, { type: "module", workerData: { dirNames } });
-        _w.on("error", () => {});
+        _w.on("error", (err) => {
+          Hades?.D?.("Worker线程错误:", err?.message);
+          _w = null;
+        });
         _w.on("exit", () => {
           _w = null;
         });
@@ -5191,7 +5167,8 @@ const _wFactory = (ctx = {}) => {
           _w.once("exit", onExit);
           _w.postMessage({ type, id, payload });
         });
-      } catch {
+      } catch (err) {
+        Hades?.W?.(`Worker ${type} 失败: ${err?.message}`);
         const fn = _wFallback[type];
         return fn ? fn(payload) : Promise.reject(new Error(`未知任务类型: ${type}`));
       }
@@ -6879,7 +6856,12 @@ class Tianshu {
       const gm = this._aliasGameIndex.get(gameKey);
       if (gm?.has(q)) return { mainName: gm.get(q), exists: true };
     } else if (this._aliasReverseIndex.has(q)) {
-      return { mainName: this._aliasReverseIndex.get(q), exists: true };
+      const mainName = this._aliasReverseIndex.get(q);
+      let foundGk = null;
+      for (const gk of this._gkOrd) {
+        if (this._aliasGameIndex.get(gk)?.has(q)) { foundGk = gk; break; }
+      }
+      return { mainName, exists: true, gameKey: foundGk };
     }
 
     const best = this._pickNm(q, gkList);
@@ -7213,23 +7195,29 @@ class Tianshu {
     const config = await Ananke.loadingConfig(MiaoPluginMBT.Paths.ConfigFilePath, MiaoPluginMBT.MBTConfig);
     const repos = Nomos.ModuleRepoAC(MiaoPluginMBT.Paths, config, context);
     const timestamp = new Date().toISOString();
+    const scanRepos = repos.filter((r) => r.path).map((r) => ({ name: r.name, path: r.path }));
+    let scanResults = {};
+    if (scanRepos.length > 0) {
+      try {
+        const worker = await HotModule.load("worker", { dirNames: Nomos.DirNames });
+        try {
+          scanResults = await worker.run("SCAN_STATS", { repos: scanRepos, _dirNames: Nomos.DirNames });
+        } finally {
+          HotModule.terminate("worker");
+        }
+      } catch (err) {
+        Hades?.E?.("Worker SCAN_STATS 失败:", err?.message);
+      }
+    }
     const results = await Promise.all(
       repos.map(async (repo) => {
         if (!repo.path) return [repo.num, {}];
         const gitStatus = await Nomos.getRepoStatus(repo.path);
         let fsCounts = { roles: 0, images: 0 };
-        try {
-          const worker = await HotModule.load("worker", { dirNames: Nomos.DirNames });
-          try {
-            const repoStats = await worker.run("SCAN_STATS", { repos: [{ name: repo.name, path: repo.path }], _dirNames: Nomos.DirNames });
-            for (const gameStats of Object.values(repoStats[repo.name]?.games || {})) {
-              fsCounts.roles += gameStats.roles;
-              fsCounts.images += gameStats.images;
-            }
-          } finally {
-            HotModule.terminate("worker");
-          }
-        } catch {}
+        for (const gameStats of Object.values(scanResults[repo.name]?.games || {})) {
+          fsCounts.roles += gameStats.roles;
+          fsCounts.images += gameStats.images;
+        }
         const size = await Ananke.measure(repo.path);
         const gitSize = await Ananke.measure(repo.gitPath);
         const nodeName = await Tianshu.ResolveGitNode(repo.path);
@@ -8220,6 +8208,11 @@ class MiaoPluginMBT extends plugin {
           if (MiaoPluginMBT._AliasVerCache.gsKey !== gsCacheKey) {
             const GSModule = await import(`${toFileUrl(GSAliasPath)}?v=${gsVersion}`);
             GSAlias = GSModule.alias || {};
+            try {
+              const GSExtraPath = path.join(MiaoPluginMBT.Paths.Target.Miao_GSAliasDir, "extra.js");
+              const GSExtraModule = await import(`${toFileUrl(GSExtraPath)}?v=${gsVersion}`);
+              if (GSExtraModule.extraChars) Object.assign(GSAlias, GSExtraModule.extraChars);
+            } catch {}
             MiaoPluginMBT._AliasVerCache.gsKey = gsCacheKey;
             MiaoPluginMBT._AliasVerCache.gsData = GSAlias;
           } else {
@@ -9561,11 +9554,16 @@ class MiaoPluginMBT extends plugin {
 
         if (!syncResult.success) {
           const syncErrText = collectGitErrText(syncResult.error);
-          const isNetErr =
-            !!syncResult.error && (Git_Timeout_Err_Codes.has(String(syncResult.error.code).toUpperCase()) || Git_Network_Err_Keywords.some((k) => syncErrText.includes(k)));
+          const currentRemote = (await MBTPipeControl("git", ["remote", "get-url", "origin"], { cwd: localPath }).catch(() => ({ stdout: "未知" }))).stdout.trim() || "未知";
+          const _originMirror = (DFC.F2Pool || []).find((p) => p.name !== "GitHub" && p.ClonePrefix && currentRemote.startsWith(p.ClonePrefix.replace(/\/$/, "")));
+          const _originName = _originMirror?.name || "GitHub";
+          const _p1Strike = PoseidonSpear.strike(_originName, syncErrText);
+          if (_p1Strike.punished) {
+            Hades.D(`[Phase 1] 🔱 节点熔断: [${_originName}] ${_p1Strike.type} (冷却 ${(_p1Strike.coolingTime / 60000).toFixed(0)}m)`);
+          }
+          const isNetErr = !!syncResult.error && (Git_Timeout_Err_Codes.has(String(syncResult.error.code).toUpperCase()) || _p1Strike.punished);
 
           if (isNetErr) {
-            const currentRemote = (await MBTPipeControl("git", ["remote", "get-url", "origin"], { cwd: localPath }).catch(() => ({ stdout: "未知" }))).stdout.trim() || "未知";
             Hades.D(`[Phase 2] ${RepoName} 网络波动[源:${currentRemote}]`);
 
             let repo_path = parseGitHubRepoPath(RepoUrl) || parseGitHubRepoPath(currentRemote);
@@ -9623,11 +9621,20 @@ class MiaoPluginMBT extends plugin {
                 syncResult = await executeSyncLogic(cleanOpts, basePullTimeout);
                 if (syncResult.success) {
                   state.autoSwitchedNode = winner.name;
+                  await rollback_origin(`${winner.name}-success`);
                   Hades.D(`[Phase 2] 镜像成功[${winner.name}]`);
                   break;
                 }
+                const _syncStrike = PoseidonSpear.strike(winner.name, collectGitErrText(syncResult.error));
+                if (_syncStrike.punished) {
+                  Hades.D(`[Phase 2] 节点熔断: [${winner.name}] ${_syncStrike.type} (冷却 ${(_syncStrike.coolingTime / 60000).toFixed(0)}m)`);
+                }
                 await rollback_origin(`${winner.name}-sync-fail`);
               } catch (e) {
+                const _errStrike = PoseidonSpear.strike(winner.name, collectGitErrText(e));
+                if (_errStrike.punished) {
+                  Hades.D(`[Phase 2] 节点熔断: [${winner.name}] ${_errStrike.type} (冷却 ${(_errStrike.coolingTime / 60000).toFixed(0)}m)`);
+                }
                 await rollback_origin(`${winner.name}-error`);
               }
             }
@@ -9686,69 +9693,104 @@ class MiaoPluginMBT extends plugin {
                   displayParts: [],
                   commitScopeClass: "scope-default"
                 };
-                const ccMatch = subject.match(/^([a-zA-Z\u4e00-\u9fa5]+)(?:\(([^)]+)\))?[:：]\s*(?:\[([^\]]+)\]\s*)?(.+)/);
-                if (ccMatch) {
-                  const rawPrefix = ccMatch[1].toLowerCase();
-                  commit.commitPrefix = Commit_Prefix_Map[rawPrefix] || rawPrefix;
-                  commit.commitScope = ccMatch[2] || ccMatch[3];
-                  commit.commitTitle = ccMatch[4].trim();
-                  if (commit.commitScope)
-                    commit.commitScopeClass = commit.commitScope.toLowerCase().includes("web")
-                      ? "scope-web"
-                      : commit.commitScope.toLowerCase().includes("core")
-                        ? "scope-core"
-                        : "scope-default";
-                }
-                if (body) {
-                  let html = body
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
-                    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-                    .replace(/`([^`]+)`/g, "<code>$1</code>");
-                  let inList = false;
-                  html = html
-                    .split("\n")
-                    .map((line) => {
-                      line = line.trim();
-                      if (line.startsWith("###")) return `<h3>${line.replace(/###\s*/, "")}</h3>`;
-                      if (line.startsWith("- ")) {
-                        const item = `<li>${line.replace(/-\s*/, "")}</li>`;
-                        if (!inList) {
-                          inList = true;
-                          return `<ul>${item}`;
-                        }
-                        return item;
-                      }
-                      if (inList) {
-                        inList = false;
-                        return `</ul><p>${line}</p>`;
-                      }
-                      return line ? `<p>${line}</p>` : "";
-                    })
-                    .join("");
-                  if (inList) html += "</ul>";
-                  commit.descriptionBodyHtml = html;
-                }
+                const resolveCharFace = async (gk, name) => {
+                  if (gk === "gs" || gk === "sr") return (await CreFaceMod.ResolveFace(gk, name)) || BtnFaceUrl;
+                  if (gk === "zzz") return (await CreFaceMod.FindZZZIcon(name)) || BtnFaceUrl;
+                  if (gk === "waves") return CreFaceMod.ResolveWavesFace(name) || BtnFaceUrl;
+                  return BtnFaceUrl;
+                };
+                let prefixMatched = false;
                 for (const gp of Commit_Game_Prefixes) {
-                  if (gp.pattern.test(commit.commitTitle)) {
+                  if (gp.pattern.test(subject)) {
+                    prefixMatched = true;
                     commit.isDescription = false;
-                    const names = commit.commitTitle
-                      .replace(gp.pattern, "")
-                      .split(/[/、，,]/)
-                      .map((n) => n.trim())
-                      .filter(Boolean);
+                    commit.commitTitle = subject.replace(gp.pattern, "").trim();
+                    const names = commit.commitTitle.split(/[/、，,]/).map((n) => n.trim()).filter(Boolean);
                     for (const rawName of names) {
                       let displayName = rawName;
                       const aliasRes = await Tianshu.NormalizeName(rawName, { gameKey: gp.key });
                       if (aliasRes.exists) displayName = aliasRes.mainName;
-                      let faceUrl = BtnFaceUrl;
-                      if (gp.key === "gs" || gp.key === "sr") faceUrl = (await CreFaceMod.ResolveFace(gp.key, displayName)) || BtnFaceUrl;
-                      else if (gp.key === "zzz") faceUrl = (await CreFaceMod.FindZZZIcon(displayName)) || BtnFaceUrl;
-                      else if (gp.key === "waves") faceUrl = CreFaceMod.ResolveWavesFace(displayName) || BtnFaceUrl;
-                      commit.displayParts.push({ type: "character", name: displayName, game: gp.key, imageUrl: faceUrl });
+                      commit.displayParts.push({ type: "character", name: displayName, game: gp.key, imageUrl: await resolveCharFace(gp.key, displayName) });
                     }
                     break;
+                  }
+                }
+                if (!prefixMatched && /^UP[:：]\s*/i.test(subject)) {
+                  prefixMatched = true;
+                  commit.isDescription = false;
+                  commit.commitTitle = subject.replace(/^UP[:：]\s*/i, "").trim();
+                  const names = commit.commitTitle.split(/[/、，,]/).map((n) => n.trim()).filter(Boolean);
+                  for (const rawName of names) {
+                    const aliasRes = await Tianshu.NormalizeName(rawName, {});
+                    if (aliasRes.exists) {
+                      commit.displayParts.push({ type: "character", name: aliasRes.mainName, game: aliasRes.gameKey, imageUrl: await resolveCharFace(aliasRes.gameKey, aliasRes.mainName) });
+                    } else {
+                      commit.displayParts.push({ type: "character", name: rawName, game: "unknown", imageUrl: BtnFaceUrl });
+                    }
+                  }
+                }
+                if (!prefixMatched) {
+                  const ccMatch = subject.match(/^([a-zA-Z\u4e00-\u9fa5]+)(?:\(([^)]+)\))?[:：]\s*(?:\[([^\]]+)\]\s*)?(.+)/);
+                  if (ccMatch) {
+                    const rawPrefix = ccMatch[1].toLowerCase();
+                    commit.commitPrefix = Commit_Prefix_Map[rawPrefix] || rawPrefix;
+                    commit.commitScope = ccMatch[2] || ccMatch[3];
+                    commit.commitTitle = ccMatch[4].trim();
+                    if (commit.commitScope)
+                      commit.commitScopeClass = commit.commitScope.toLowerCase().includes("web")
+                        ? "scope-web"
+                        : commit.commitScope.toLowerCase().includes("core")
+                          ? "scope-core"
+                          : "scope-default";
+                  }
+                  if (body) {
+                    let html = body
+                      .replace(/&/g, "&amp;")
+                      .replace(/</g, "&lt;")
+                      .replace(/>/g, "&gt;")
+                      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+                      .replace(/`([^`]+)`/g, "<code>$1</code>");
+                    let inList = false;
+                    html = html
+                      .split("\n")
+                      .map((line) => {
+                        line = line.trim();
+                        if (line.startsWith("###")) return `<h3>${line.replace(/###\s*/, "")}</h3>`;
+                        if (line.startsWith("- ")) {
+                          const item = `<li>${line.replace(/-\s*/, "")}</li>`;
+                          if (!inList) {
+                            inList = true;
+                            return `<ul>${item}`;
+                          }
+                          return item;
+                        }
+                        if (inList) {
+                          inList = false;
+                          return `</ul><p>${line}</p>`;
+                        }
+                        return line ? `<p>${line}</p>` : "";
+                      })
+                      .join("");
+                    if (inList) html += "</ul>";
+                    commit.descriptionBodyHtml = html;
+                  }
+                  if (commit.displayParts.length === 0 && commit.commitTitle) {
+                    const segments = commit.commitTitle.split(/[/、，,\s]+/).map((n) => n.trim()).filter(Boolean);
+                    if (segments.length > 0) {
+                      const matches = [];
+                      for (const seg of segments) {
+                        const aliasRes = await Tianshu.NormalizeName(seg, {});
+                        if (aliasRes.exists) {
+                          matches.push({ mainName: aliasRes.mainName, gameKey: aliasRes.gameKey });
+                        }
+                      }
+                      if (matches.length > 0 && matches.length >= Math.ceil(segments.length * 0.5)) {
+                        commit.isDescription = false;
+                        for (const m of matches) {
+                          commit.displayParts.push({ type: "character", name: m.mainName, game: m.gameKey, imageUrl: await resolveCharFace(m.gameKey, m.mainName) });
+                        }
+                      }
+                    }
                   }
                 }
                 return commit;

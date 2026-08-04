@@ -138,12 +138,15 @@ export function ExtRpNm(Url) {
 export function RpInfRes(Input) {
   try {
     const { Url, Alias } = AssRInp(Input);
+    const RawObj = CvlUrlObj(Url);
+    const RawHst = RawObj ? RawObj.hostname.toLowerCase() : "";
+    const isHG = RawHst === "github.com" || RawHst.endsWith(".github.com");
     const C = DeepWash(Url);
     const Core = ExtractCore(C);
-    const Plat = (C.match(PlatPat)?.[0] || "unknown").toLowerCase();
-    const OwnNm = Core ? Core.Owner : (CvlUrlObj(C)?.pathname.split("/").filter(Boolean)[0] || "未知作者");
+    const Plat = IsGitHost(RawHst) ? (RawHst.match(PlatPat)?.[0] || "unknown").toLowerCase() : "unknown";
+    const OwnNm = Core ? Core.Owner : (RawObj?.pathname.split("/").filter(Boolean)[0] || "未知作者");
     const Urp = Core ? Core.Owner + "/" + Core.Repo : null;
-    return { url: C, alias: Alias, urp: Urp, isHG: !!Urp, OwnNm, Plat };
+    return { url: isHG ? C : Url, alias: Alias, urp: Urp, isHG: isHG && !!Urp, OwnNm, Plat };
   } catch {
     return { url: Input, alias: "Repo_" + Date.now(), isHG: false, OwnNm: "未知作者", Plat: "unknown" };
   }

@@ -658,7 +658,7 @@ check('HMR', 'bus 绑定 moduleReloadListener', busOffIdx !== -1 && busOnIdx !==
         const src = await fsMod.readFile(corePath, 'utf-8');
 
         const hasFiveConstants = src.includes('Git_Timeout_Err_Codes') &&
-            src.includes('Git_Network_Err_Keywords') &&
+            src.includes('Git_Strike_Strategies') &&
             src.includes('Help_Fallback_Lines') &&
             src.includes('Commit_Prefix_Map') &&
             src.includes('Commit_Game_Prefixes');

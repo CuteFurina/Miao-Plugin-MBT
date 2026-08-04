@@ -1,4 +1,4 @@
-# Miao-Plugin-MBT 🐂🐂
+# Miao-Plugin-MBT / CowCoo
 
 <img 
   decoding="async"
@@ -8,7 +8,23 @@
   alt="image"
   title="image">
   
-图库是 Yunzai 的插件角色面板图资源补充，涵盖了**原神&星铁&绝区零&鸣潮**的面板图资源，创建于**2023年10月**，希望能提供更优质的面板图资源。管理器内置 [智谱，讯飞星火] 双智能体辅助提供智能决策；同时支持 99.7% 的热重载可在不重启下热更新插件和子模块；
+图库是 Yunzai 的插件角色面板图资源补充，涵盖了**原神&星铁&绝区零&鸣潮**的面板图资源，创建于**2023年10月**，希望能提供更优质的面板图资源，留学移民可进群交流：<a href="https://qm.qq.com/q/cyXMqRBzY6" target="_blank" style="text-decoration: none;">
+  <button style="
+    padding: 10px 20px;
+    font-size: 16px;
+    font-weight: bold;
+    color: white;
+    background: linear-gradient(to right, #00aaff, #0077ff);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: background 0.3s ease;
+  " onmouseover="this.style.background='linear-gradient(to right, #0099dd, #0055dd)'"
+     onmouseout="this.style.background='linear-gradient(to right, #00aaff, #0077ff)'">
+    💬 留学移民交流群
+  </button>
+</a>；
 
 #### 适配的游戏插件
 
@@ -22,6 +38,7 @@
 
 - **部分图片为付费商业素材**，**图片资源严禁用于任何商业用途**。如有侵权请联系删除。
 - 咕咕牛已购买素材仅用于展示用途，咕咕牛不拥有其版权**后续使用或传播行为与本项目无关**。
+- 管理器已内嵌多模态 Agent 智能体仅负责收集错误数据用于辅助。
 
 ---
 
@@ -37,12 +54,13 @@
 | 2    | 最高净化     | 严格过滤所有敏感内容（含 Rx18 + Px18）            |
 
 咕咕牛支持元数据级别的面板图封禁，配合以下指令可独立管理图片类型开关：
-- #咕咕牛封禁 / 解禁 ```木偶Gu1``` (角色名)
-- #咕咕牛设置 AI图 / 彩蛋图 / 横屏图 ```启|禁用```
+- #咕咕牛封禁 / 解禁 ```木偶Gu1``` (角色名可不打Gu)
+- #咕咕牛设置 AI图 / 彩蛋图 / 横屏图 ```启|禁用``` (一级标签)
 
 ## 社区图库模块
 
-咕咕牛在已有完整适配基础上，扩展社区图库支援能力，开放接口、预置推荐库、允许自定义URL，以更低门槛包容多元图库来源：安装即自动识别仓库并应用，每周自动更新一次，更多功能可见帮助图；
+咕咕牛在已允许自定义URL的社区图库资源部署，安装即自动识别仓库并应用，每周自动更新一次，更多功能可见帮助图；
+
 | 作者 | 仓库地址 | 说明 |
 | :--- | :--- | :--- |
 | 何日见 | <https://github.com/herijian1/characterpic1> | 喵喵插件原神星铁高质量面板图 
@@ -54,35 +72,16 @@
 - #咕咕牛安装夜
 - #咕咕牛安装阿修
 
-<a href="https://qm.qq.com/q/cyXMqRBzY6" target="_blank" style="text-decoration: none;">
-  <button style="
-    padding: 10px 20px;
-    font-size: 16px;
-    font-weight: bold;
-    color: white;
-    background: linear-gradient(to right, #00aaff, #0077ff);
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    transition: background 0.3s ease;
-  " onmouseover="this.style.background='linear-gradient(to right, #0099dd, #0055dd)'"
-     onmouseout="this.style.background='linear-gradient(to right, #00aaff, #0077ff)'">
-    💬 留学移民交流
-  </button>
-</a>
+#### 自动下载状态机设计途径说明
 
-#### 自动下载算法途径
+>[!NOTE]
+> 社区图库体积均较大且未拆分库部分仓库的下载失败率偏高，算法会评估你的设备是否支持安装图库，如无法满足则需要你开启Clash等代理软件，强行使用可能会挤占硬盘存储空间！支持携带镜像头自定义URL；
 
 | 场景 | 说明 |
 | :--- | :--- |
-| Github地址且无代理网络 | 进入自动调度机分支，利用算法分配合适镜像站，此过程均会消耗一定量的硬盘存储空间 |
-| Github地址且有代理网络 | 算法进入自动穿透继承代理网络分支，使用本地代理下载 |
-| 非Github地址 | 进入标准流式传输分支 | 
-
->[!NOTE]
-> 社区图库体积均较大且未拆分库，部分仓库的下载失败率偏高，算法会评估你的设备是否支持安装图库，如无法满足则需要你开启Clash等代理软件，强行使用可能会挤占硬盘存储空间！支持携带镜像头自定义URL；
-
+| Github且无代理 | 实时算法分支，此过程均会消耗一定量的硬盘存储空间 |
+| Github且有代理 | 穿透继承代理分支(支持来自非设备的网关代理) |
+| 非Github | 标准流式传输分支 | 
 
 ---
 
