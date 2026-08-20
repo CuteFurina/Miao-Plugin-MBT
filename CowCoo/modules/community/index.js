@@ -67,7 +67,7 @@ export function Community(ctx) {
       this.mutex = CommunityMBT.mutex;
       this.taskQueue = CommunityMBT.taskQueue;
       this._loadConfig().catch(() => {});
-      this.task = { name: "『咕咕牛』社区图库定时同步", cron: "0 0 4 * * 0", fnc: () => this.CommCronUp(), log: true };
+      this.task = { name: "『咕咕牛』社区图库定时同步", cron: "0 4 */2 * *", fnc: () => this.CommCronUp(), log: true };
     }
 
     async _loadConfig() {
