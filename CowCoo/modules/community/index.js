@@ -130,7 +130,8 @@ export function Community(ctx) {
         "卸载：#咕咕牛卸载 [简称]",
         "列表：#咕咕牛列表",
         `一键安装：${DfcList || "暂无默认图库"}`,
-        "示例：#咕咕牛安装 https://github.com/user/repo:我的图库"
+        "示例：#咕咕牛安装 https://github.com/user/repo:我的图库",
+        "镜像头：#咕咕牛安装 https://ghproxy.net/https://github.com/user/repo:简称"
       ];
       await Pheme.quote(e, HMsg.join("\n"));
       return true;
@@ -188,6 +189,114 @@ export function Community(ctx) {
         if (ctx) ctx.markNoOp();
         await Pheme.quote(e, "未收到确认指令，操作已取消。");
         return false;
+      } finally {
+        if (ctx) await ctx.resume();
+      }
+    }
+
+    _parseSizeGB(Str) {
+      const M = String(Str || "").match(/([\d.]+)\s*GB/i);
+      return M ? parseFloat(M[1]) : 0;
+    }
+
+    async _probeUrl(Url, Times = 2) {
+      for (let i = 0; i < Times; i++) {
+        try {
+          const R = await Hermes.ProbeSpeed(Url, DFC.CommProbeTimeout || 10000);
+          if (R?.success && R.data !== Infinity) return true;
+        } catch {}
+      }
+      return false;
+    }
+
+    async _senseChain(Hds) {
+      try {
+        return await Promise.race([
+          MiaoPluginMBT.acquireChain(Hds),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("态势感知获取超时")), 30000))
+        ]);
+      } catch {
+        return null;
+      }
+    }
+
+    async _assessDevice(e, Url, repoInfo, ctx) {
+      const Hds = getHades ? getHades(this.logger) : this.logger;
+      const Issues = [];
+      const Hints = [];
+      let Chain = null;
+
+      let availGB = null;
+      try {
+        const St = await statfs(YzPath);
+        availGB = (St.bsize * St.bfree) / 1024 ** 3;
+      } catch {}
+      const NeedGB = this._parseSizeGB(repoInfo?.estSize) || DFC.CommMinDiskGB || 10;
+      if (availGB != null && availGB < NeedGB + 2) {
+        Issues.push(`磁盘可用空间不足（当前 ${availGB.toFixed(1)}GB，预估需求 ≥ ${Math.ceil(NeedGB + 2)}GB）`);
+      }
+
+      let Host = "";
+      try {
+        Host = new URL(Url).hostname;
+      } catch {}
+      const IsGh = /(^|\.)github\.com$/i.test(Host);
+      if (IsGh) {
+        Chain = await this._senseChain(Hds);
+        const V = Chain?.vector;
+        if (!V) {
+          if (await this._probeUrl("https://github.com", 1)) {
+            Hds.D("设备评估：态势感知不可用，退化为直连探活通过");
+          } else {
+            Issues.push("GitHub 连接超时，未检测到可用代理通道");
+          }
+        } else if (V.bizLink) {
+          Hds.D(`设备评估：GitHub 直连可达 (${Chain.desc || "NATIVE"})`);
+        } else if (V.proxyContext || V.envSet) {
+          Hds.D(`设备评估：GitHub 直连失败，继承代理通道 (${Chain.desc})`);
+          await Pheme.quote(e, "ℹ️ GitHub 直连失败，已检测到代理环境，安装将继承代理通道继续（支持来自网关的代理）。");
+        } else {
+          Issues.push("GitHub 直连超时，未检测到可用代理通道");
+          if (V.procActive) Hints.push("检测到代理进程运行，但系统流量未被接管，请在 Clash 中开启系统代理或 TUN 模式");
+        }
+      } else if (!(await this._probeUrl(Url))) {
+        Issues.push(`源站 ${Host || "未知"} 连接超时`);
+      }
+
+      if (Issues.length === 0) return { pass: true, chain: Chain, interacted: false };
+
+      const SrcTip = IsGh
+        ? Hints[0] || "如无法满足，请开启 Clash 等代理软件后重新发送安装指令"
+        : "请检查镜像站可用性，或更换其他镜像头后重试";
+      const Msg = [
+        "⛔ 设备评估未通过",
+        ...Issues.map((T) => `❖ ${T}`),
+        "",
+        "社区图库体积较大且未拆分，直连下载失败率偏高，",
+        "强行使用会因反复重试产生的临时文件挤占硬盘存储空间！",
+        "",
+        SrcTip,
+        "60秒内发送「强制安装」无视评估强行执行，超时自动取消。"
+      ].join("\n");
+      await Pheme.quote(e, Msg);
+      if (ctx) await ctx.suspend("等待设备评估确认");
+      try {
+        this.e = e;
+        const isGroup = !!e.isGroup;
+        const result = await this.awaitContext(isGroup, 60);
+        if (result === false) {
+          if (ctx) ctx.markNoOp();
+          await Pheme.quote(e, "确认超时，操作已自动取消。如已开启代理，请重新发送安装指令。");
+          return { pass: false, chain: null, interacted: true };
+        }
+        if (result?.msg?.trim() === "强制安装") {
+          Hds.W(`设备评估未通过仍强行安装：${Issues.join("；")}`);
+          await Pheme.quote(e, "已无视评估结果，继续安装。失败重试可能进一步挤占硬盘存储空间。");
+          return { pass: true, chain: null, interacted: true };
+        }
+        if (ctx) ctx.markNoOp();
+        await Pheme.quote(e, "未收到确认指令，操作已取消。");
+        return { pass: false, chain: null, interacted: true };
       } finally {
         if (ctx) await ctx.resume();
       }
@@ -364,7 +473,7 @@ export function Community(ctx) {
       return "main";
     }
 
-    async _DLGitHubRepo(e, Url, TgtP, Signal, repoInfo = null) {
+    async _DLGitHubRepo(e, Url, TgtP, Signal, repoInfo = null, SenseChain = null) {
       const Hds = getHades ? getHades(this.logger) : this.logger;
       let downloadConstraints = null;
       if (repoInfo?.ultraLarge) {
@@ -394,15 +503,17 @@ export function Community(ctx) {
       if (validNodes.length === 0) {
         validNodes = [{ name: "GitHub", ClonePrefix: "https://github.com/", protocol: "HTTPS", speed: Infinity }];
       }
-      const globalSenseChain = await Promise.race([
-        MiaoPluginMBT.acquireChain(Hds),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("态势感知获取超时")), 30000))
-      ]).catch(() => null);
+      const globalSenseChain = SenseChain
+        ? null
+        : await Promise.race([
+            MiaoPluginMBT.acquireChain(Hds),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("态势感知获取超时")), 30000))
+          ]).catch(() => null);
       let TheGrid = MiaoPluginMBT._PruneFatigue(validNodes);
       if (TheGrid.length === 0) TheGrid = validNodes;
       const Br = await this._DBH(Url);
       const runtimeContext = new RuntimeCtx();
-      let senseChain = globalSenseChain;
+      let senseChain = SenseChain || globalSenseChain;
       if (!senseChain) {
         const envData = await Hermes.getEnvInfo(Hds);
         const bestMirror = TheGrid.find((n) => n.name !== "GitHub" && PoseidonSpear.isLive(n.name));
@@ -508,7 +619,7 @@ export function Community(ctx) {
 
     _buildRepoView(Alias, Info) {
       const NotIns = !!Info.notInstalled;
-      const Plat = Info.platform || Info.url?.match(/(github|gitee|gitcode)/i)?.[0]?.toLowerCase() || "unknown";
+      const Plat = (Info.platform || Info.url?.match(/(github|gitee|gitcode)/i)?.[0]?.toLowerCase() || "unknown").replace(/\.(com|org|net)$/i, "");
       const HvRcog = !NotIns && Scan.HvRcog(Info.contentMap);
       const FmtDt = (Iso) => {
         if (!Iso) return "N/A";
@@ -584,8 +695,10 @@ export function Community(ctx) {
                 ctx.markNoOp();
                 return;
               }
+              const Assess = await this._assessDevice(e, url, DfcRp, ctx);
+              if (!Assess.pass) return;
               await Ananke.mkdirs(this.paths.base);
-              if (isHG) await this._DLGitHubRepo(e, url, TgtP, Signal, DfcRp);
+              if (isHG) await this._DLGitHubRepo(e, url, TgtP, Signal, DfcRp, Assess.interacted ? null : Assess.chain);
               else await this._cloneToTemp(url, TgtP, Signal);
               await MiaoPluginMBT.MetaHub.AC(true);
               let syncedCount;
@@ -659,8 +772,10 @@ export function Community(ctx) {
               ctx.markNoOp();
               return;
             }
+            const Assess = await this._assessDevice(e, url, DfcInfo, ctx);
+            if (!Assess.pass) return;
             await Ananke.mkdirs(this.paths.base);
-            if (isHG) await this._DLGitHubRepo(e, url, TgtP, Signal, DfcInfo);
+            if (isHG) await this._DLGitHubRepo(e, url, TgtP, Signal, DfcInfo, Assess.interacted ? null : Assess.chain);
             else await this._cloneToTemp(url, TgtP, Signal);
             await MiaoPluginMBT.MetaHub.AC(true);
             let syncedCount;

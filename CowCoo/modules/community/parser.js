@@ -12,8 +12,12 @@ function AssRInp(input) {
   const Pos = input.lastIndexOf(":");
   let Url = input, Alias;
   if (Pos > 5) {
-    Url = input.substring(0, Pos).trim();
-    Alias = input.substring(Pos + 1).trim();
+    const Tail = input.substring(Pos + 1).trim();
+    const IsUrlSeg = /^\/\//.test(Tail) || /^\d+\//.test(Tail);
+    if (Tail && !IsUrlSeg) {
+      Url = input.substring(0, Pos).trim();
+      Alias = Tail;
+    }
   }
   Url = Url.trim();
   Alias = Alias || Url.split("/").pop().replace(/\.git$/i, "") || "Repo_" + Date.now();
@@ -143,7 +147,8 @@ export function RpInfRes(Input) {
     const isHG = RawHst === "github.com" || RawHst.endsWith(".github.com");
     const C = DeepWash(Url);
     const Core = ExtractCore(C);
-    const Plat = IsGitHost(RawHst) ? (RawHst.match(PlatPat)?.[0] || "unknown").toLowerCase() : "unknown";
+    const PlatMatch = IsGitHost(RawHst) ? RawHst.match(PlatPat)?.[0] : Url.match(PlatPat)?.[0];
+    const Plat = PlatMatch ? PlatMatch.toLowerCase().split(".")[0] : "unknown";
     const OwnNm = Core ? Core.Owner : (RawObj?.pathname.split("/").filter(Boolean)[0] || "未知作者");
     const Urp = Core ? Core.Owner + "/" + Core.Repo : null;
     return { url: isHG ? C : Url, alias: Alias, urp: Urp, isHG: isHG && !!Urp, OwnNm, Plat };
